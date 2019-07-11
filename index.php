@@ -1,3 +1,70 @@
+<?php
+session_start();
+require('dbconnect.php');
+
+//１時間なにもしなければログアウトする
+if(isset($_SESSION['id']) && $_SESSION['time'] + 3600 > time()){
+  //何かすればセッションの時間を更新する
+  $_SESSION['time'] = time();
+
+  //ログイン処理
+  $members =$db->prepare('SELECT * FROM members WHERE id = ?');
+  $members->execute(array($_SESSION['id']));
+  $member = $members->fetch();
+
+}else{
+  header('Location: login.php');
+  exit();
+}
+
+//POSTされたとき
+if(!empty($_POST)){
+//かつメッセージが空じゃない時
+  if($_POST['message'] !== ""){
+    $message = $db->prepare('INSERT INTO posts SET member_id = ? , message = ? , reply_message_id = ?,created = NOW()');
+    $message->execute(array(
+      $member['id'],
+      $_POST['message']
+      $_POST['reply_post_id']
+    ));
+    //POSTが終われば再読みすることでリダイレクして複数同じmessageが裏でPOSTされるのを防ぐ
+    header('Location: index.php');
+    exit();
+  }
+}
+
+
+$page = $_REQUEST['page'];
+
+//１ページ目は0~5,２ページ目は6~10とする
+$start = ($page - 1) * 5;
+
+//投稿を取得する dbのmembersのidとpostsのmember_idが一致したもののm.name, m.pictureを取得
+$posts = $db->prepare('SELECT m.name, m.picture, p.*FROM members m ,posts p WHERE m.id = p.member_id ORDER BY p.created DESC LIMIT ?,5');
+
+$posts->bindparam(1,$start,PDO::PARAM_INT);
+
+$posts->execute();
+if($page == ""){
+  $page = 1;
+}
+
+//pageは1以下にはならない！
+$page = max($page,1);
+
+//現在のpostsの数をdbから取得
+$counts = $db->query('SELECT COUNT(*) AS cnt FROM posts');
+
+$cnt = $counts->fetch();
+
+//取得したpostsの数を5で割って、小数点以下を切り上げる
+$maxPage = ceil($cnt['cnt']/5);
+
+//これでmaxPageよりURLパラメータに直接打ち込んだpageが大きくならない
+$page = min($page,$maxPage);
+
+?>
+
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -18,10 +85,12 @@
   	<div style="text-align: right"><a href="logout.php">ログアウト</a></div>
     <form action="" method="post">
       <dl>
-        <dt>○○さん、メッセージをどうぞ</dt>
+        <dt><?php print(htmlspecialchars($member['name'],ENT_QUOTES));?>さん、メッセージをどうぞ</dt>
         <dd>
-          <textarea name="message" cols="50" rows="5"></textarea>
-          <input type="hidden" name="reply_post_id" value="" />
+          <textarea name="message" cols="50" rows="5">
+            <?php print(htmlspecialchars($message, ENT_QUOTES)); ?>
+          </textarea>
+          <input type="hidden" name="reply_post_id" value="<?php print(htmlspecialchars($_REQUEST['res'], ENT_QUOTES)); ?>" />
         </dd>
       </dl>
       <div>
@@ -31,20 +100,43 @@
       </div>
     </form>
 
-    <div class="msg">
-    <img src="member_picture" width="48" height="48" alt="" />
-    <p><span class="name">（）</span>[<a href="index.php?res=">Re</a>]</p>
-    <p class="day"><a href="view.php?id="></a>
-<a href="view.php?id=">
-返信元のメッセージ</a>
-[<a href="delete.php?id="
+<!-- dbから取得したものをforeachで表示 -->
+<?php foreach($posts as $post): ?>
+<div class="msg">
+<img src="member_pciture/<?php print(htmlspecialchars($post['picture'], ENT_QUOTES)); ?>" width="48" height="48" alt="<?php print(htmlspecialchars($post['name'], ENT_QUOTES)); ?>" />
+<p><?php print(htmlspecialchars($post['message'], ENT_QUOTES)); ?><span class="name">（<?php print(htmlspecialchars($post['name'], ENT_QUOTES)); ?>）</span>
+[<a href="index.php?res=<?php print(htmlspecialchars($post['id'], ENT_QUOTES)); ?>">Re</a>]
+</p>
+<p class="day"><a href="view.php?id="><?php print(htmlspecialchars($post['created'], ENT_QUOTES)); ?></a>
+
+<?php if ($post['reply_message_id']> 0): ?>
+<a href="view.php?id=<?php print(htmlspecialchars($post['id'], ENT_QUOTES)); ?>">
+  返信元のメッセージ</a>
+<?php endif ; ?>
+
+<!-- 自分のidの時のみ削除を表示する -->
+<?php if ($_SESSION['id'] == $post['member_id']): ?>
+[<a href="delete.php?id=<?php print(htmlspecialchars($post['id'], ENT_QUOTES)); ?>"
 style="color: #F33;">削除</a>]
-    </p>
-    </div>
+</p>
+</div>
+<?php endif; ?>
+
+<?php endforeach; ?>
 
 <ul class="paging">
-<li><a href="index.php?page=">前のページへ</a></li>
-<li><a href="index.php?page=">次のページへ</a></li>
+<!-- ページの数によってリンクがは貼られるか変える処理 -->
+<?php if($page > 1): ?>
+<li><a href="index.php?page=<?php print($page-1); ?>">前のページへ</a></li>
+<?php else: ?>
+<li>前のページへ</li>
+<?php endif: ?>
+
+<?php if($page < $maxPage): ?>
+<li><a href="index.php?page=<?php print($page+1); ?>">次のページへ</a></li>
+<?php else: ?>
+<li>次のページへ</li>
+<?php endif: ?>
 </ul>
   </div>
 </div>
